@@ -1,7 +1,8 @@
 name: Simulação
 
-# Sobe o n8n de verdade, ativa os dois workflows, manda um dia de mensagens de clientes fictícios
-# pelos webhooks, confere cada resposta e o resumo de produção, e publica a página no GitHub Pages.
+# Sobe o n8n de verdade, ativa os três workflows, manda um dia de mensagens de clientes fictícios
+# pelos webhooks, confere cada resposta e o resumo de produção, testa o WhatsApp contra uma
+# "Meta falsa" (assinatura, verificação, respostas) e publica a página no GitHub Pages.
 on:
   push:
     branches: [main]
@@ -22,6 +23,11 @@ env:
   N8N_USER_FOLDER: ${{ github.workspace }}/.n8n-ci
   N8N_DIAGNOSTICS_ENABLED: "false"
   GENERIC_TIMEZONE: America/Sao_Paulo
+  # Só para o teste: segredos falsos, a Meta falsa confere o token da credencial de teste.
+  N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+  NODE_FUNCTION_ALLOW_BUILTIN: crypto
+  WHATSAPP_APP_SECRET: segredo-de-teste
+  WHATSAPP_VERIFY_TOKEN: verify-de-teste
 
 jobs:
   simular:
@@ -37,17 +43,23 @@ jobs:
           key: n8n-${{ env.N8N_VERSION }}
       - name: Instalar o n8n
         run: npm install -g --no-audit --no-fund n8n@${{ env.N8N_VERSION }}
+      - name: Subir a Meta falsa e apontar o workflow do WhatsApp para ela
+        run: |
+          nohup node scripts/meta-falsa.js 9999 token-de-teste > meta.log 2>&1 &
+          node scripts/config-teste.js http://localhost:9999/v23.0
       - name: Importar e publicar os workflows
         run: |
           for w in workflows/*.json; do n8n import:workflow --input="$w"; done
-          n8n publish:workflow --id=bypenasPedido001
-          n8n publish:workflow --id=bypenasResumo001
+          n8n import:credentials --input=credenciais/whatsapp-teste.json
+          for id in bypenasPedido001 bypenasResumo001 bypenasWhats0001; do n8n publish:workflow --id=$id; done
       - name: Subir o n8n
         run: |
           nohup n8n start > n8n.log 2>&1 &
           for i in $(seq 90); do curl -sf http://localhost:5678/healthz && break; sleep 2; done
       - name: Simular um dia de pedidos
         run: node scripts/simular.js http://localhost:5678 simulacao.json
+      - name: Testar o WhatsApp (verificação, assinatura, respostas)
+        run: node scripts/simular-whatsapp.js http://localhost:5678 http://localhost:9999 "$WHATSAPP_APP_SECRET" "$WHATSAPP_VERIFY_TOKEN"
       - name: Montar a página
         run: node scripts/pagina.js simulacao.json site/index.html && cp simulacao.json site/
       - uses: actions/upload-artifact@v4
@@ -57,6 +69,7 @@ jobs:
           path: |
             site
             n8n.log
+            meta.log
       - if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:

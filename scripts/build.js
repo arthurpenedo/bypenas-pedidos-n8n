@@ -142,8 +142,114 @@ function resumoDoDia() {
   return { id: "bypenasResumo001", name: "By.penas · Resumo do dia", nodes, connections };
 }
 
+// WhatsApp Cloud API (Meta). Segredos ficam fora do JSON: o token numa credencial Header Auth do n8n,
+// o App Secret e o verify token em variáveis de ambiente (WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN).
+function whatsapp() {
+  const wa = JSON.parse(ler("config", "config.json")).whatsapp;
+  const credencial = { httpHeaderAuth: { id: "waToken000000001", name: "WhatsApp Cloud API (token)" } };
+  const nodes = [
+    no("w1", "Verificação da Meta", "webhook", 2.1, [0, 0],
+      { httpMethod: "GET", path: "whatsapp", responseMode: "responseNode", options: {} },
+      { webhookId: "2f6c1b0e-8a4d-4e0b-9a51-b1e5a0000003" }),
+    code("w2", "Conferir token de verificação", [220, 0],
+      "// A Meta chama GET ?hub.mode=subscribe&hub.verify_token=...&hub.challenge=... ao cadastrar o webhook.\n" +
+      "const q = $input.first().json.query || {};\n" +
+      "const esperado = $env.WHATSAPP_VERIFY_TOKEN;\n" +
+      "const ok = Boolean(esperado) && q['hub.mode'] === 'subscribe' && q['hub.verify_token'] === esperado;\n" +
+      "return [{ json: { ok, challenge: String(q['hub.challenge'] || '') } }];"),
+    no("w3", "Token confere?", "if", 2.2, [440, 0], {
+      conditions: {
+        options: { caseSensitive: true, leftValue: "", typeValidation: "loose", version: 2 },
+        conditions: [{ id: "v1", leftValue: "={{ $json.ok }}", rightValue: true,
+          operator: { type: "boolean", operation: "true", singleValue: true } }],
+        combinator: "and",
+      },
+      looseTypeValidation: true,
+      options: {},
+    }),
+    no("w4", "Devolver challenge", "respondToWebhook", 1.5, [660, -80],
+      { respondWith: "text", responseBody: "={{ $json.challenge }}", options: { responseCode: 200 } }),
+    no("w5", "Recusar", "respondToWebhook", 1.5, [660, 80],
+      { respondWith: "text", responseBody: "token inválido", options: { responseCode: 403 } }),
+
+    no("m1", "Mensagem do WhatsApp", "webhook", 2.1, [0, 320],
+      { httpMethod: "POST", path: "whatsapp", responseMode: "onReceived", options: { rawBody: true } },
+      { webhookId: "2f6c1b0e-8a4d-4e0b-9a51-b1e5a0000004" }),
+    code("m2", "Validar e extrair", [220, 320],
+      `${fonte("whatsapp.js")}\n\n` +
+      "const crypto = require('crypto');\n" +
+      "const segredo = $env.WHATSAPP_APP_SECRET;\n" +
+      "if (!segredo) throw new Error('Defina WHATSAPP_APP_SECRET: sem ele não dá para conferir a assinatura da Meta.');\n" +
+      "const requisicao = $input.first();\n" +
+      "const cru = await this.helpers.getBinaryDataBuffer(0, 'data');\n" +
+      "if (!assinaturaValida(cru, requisicao.json.headers['x-hub-signature-256'], segredo, crypto)) {\n" +
+      "  return []; // assinatura inválida: descarta sem processar nada\n" +
+      "}\n" +
+      "return extrairMensagens(requisicao.json.body).map((m) => ({ json: m }));"),
+    code("m3", "Configuração", [440, 320],
+      "// URLs e o ID do número na Meta. O token fica na credencial do nó \"Responder no WhatsApp\".\n" +
+      `const config = ${JSON.stringify(wa, null, 2)};\n` +
+      "return $input.all().map((i) => ({ json: { ...i.json, config } }));"),
+    no("m4", "É texto?", "if", 2.2, [660, 320], {
+      conditions: {
+        options: { caseSensitive: true, leftValue: "", typeValidation: "loose", version: 2 },
+        conditions: [{ id: "m1", leftValue: "={{ $json.tipo }}", rightValue: "text",
+          operator: { type: "string", operation: "equals" } }],
+        combinator: "and",
+      },
+      looseTypeValidation: true,
+      options: {},
+    }),
+    no("m5", "Processar pedido", "httpRequest", 4.2, [880, 240], {
+      method: "POST",
+      url: "={{ $json.config.pedidos_url }}",
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody: "={{ JSON.stringify({ cliente: $json.cliente, telefone: $json.telefone, mensagem: $json.texto }) }}",
+      options: { timeout: 20000 },
+    }, { onError: "continueRegularOutput" }),
+    code("m6", "Resposta do pedido", [1100, 240],
+      `${fonte("whatsapp.js")}\n\n` +
+      "return $input.all().map((item, i) => {\n" +
+      "  const msg = $('É texto?').itemMatching(i).json;\n" +
+      "  const texto = item.json.resposta || 'Recebi sua mensagem! Já te respondo por aqui. 😊'; // pedidos fora do ar\n" +
+      "  return { json: { config: msg.config, status: item.json.status || 'erro', envio: mensagemDeTexto(msg.telefone, texto) } };\n" +
+      "});"),
+    code("m7", "Resposta para não-texto", [1100, 400],
+      `${fonte("whatsapp.js")}\n\n` +
+      "return $input.all().map((item) => ({ json: { config: item.json.config, status: 'nao_texto',\n" +
+      "  envio: mensagemDeTexto(item.json.telefone, respostaNaoTexto(item.json)) } }));"),
+    no("m8", "Responder no WhatsApp", "httpRequest", 4.2, [1320, 320], {
+      method: "POST",
+      url: "={{ $json.config.graph_url }}/{{ $json.config.phone_number_id }}/messages",
+      authentication: "genericCredentialType",
+      genericAuthType: "httpHeaderAuth",
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody: "={{ JSON.stringify($json.envio) }}",
+      options: { timeout: 20000 },
+    }, { credentials: credencial, retryOnFail: true, maxTries: 3, waitBetweenTries: 2000 }),
+  ];
+  const connections = {
+    "Verificação da Meta": liga("Conferir token de verificação"),
+    "Conferir token de verificação": liga("Token confere?"),
+    "Token confere?": { main: [[{ node: "Devolver challenge", type: "main", index: 0 }],
+      [{ node: "Recusar", type: "main", index: 0 }]] },
+    "Mensagem do WhatsApp": liga("Validar e extrair"),
+    "Validar e extrair": liga("Configuração"),
+    "Configuração": liga("É texto?"),
+    "É texto?": { main: [[{ node: "Processar pedido", type: "main", index: 0 }],
+      [{ node: "Resposta para não-texto", type: "main", index: 0 }]] },
+    "Processar pedido": liga("Resposta do pedido"),
+    "Resposta do pedido": liga("Responder no WhatsApp"),
+    "Resposta para não-texto": liga("Responder no WhatsApp"),
+  };
+  return { id: "bypenasWhats0001", name: "By.penas · WhatsApp", nodes, connections };
+}
+
 const saidas = {};
-for (const [arquivo, wf] of [["receber-pedido.json", receberPedido()], ["resumo-do-dia.json", resumoDoDia()]]) {
+for (const [arquivo, wf] of [["receber-pedido.json", receberPedido()], ["resumo-do-dia.json", resumoDoDia()],
+  ["whatsapp.json", whatsapp()]]) {
   const completo = { ...wf, active: false, settings: { executionOrder: "v1", timezone: "America/Sao_Paulo" }, pinData: {}, tags: [] };
   saidas[path.join(RAIZ, "workflows", arquivo)] = JSON.stringify(completo, null, 2) + "\n";
 }

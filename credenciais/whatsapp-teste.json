@@ -1,0 +1,8 @@
+[
+  {
+    "id": "waToken000000001",
+    "name": "WhatsApp Cloud API (token)",
+    "type": "httpHeaderAuth",
+    "data": { "name": "Authorization", "value": "Bearer token-de-teste" }
+  }
+]

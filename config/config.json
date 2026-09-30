@@ -1,15 +1,52 @@
 {
   "fuso": "America/Sao_Paulo",
   "catalogo": {
-    "Clássica": { "preco": 12, "sinonimos": ["classica", "classicas", "tradicional", "tradicionais", "normal", "normais", "chocolate"] },
-    "Ninho": { "preco": 14, "sinonimos": ["ninho", "leite ninho", "leite em po"] },
-    "Oreo": { "preco": 15, "sinonimos": ["oreo", "oreos"] }
+    "Clássica": {
+      "preco": 12,
+      "sinonimos": [
+        "classica",
+        "classicas",
+        "tradicional",
+        "tradicionais",
+        "normal",
+        "normais",
+        "chocolate"
+      ]
+    },
+    "Ninho": {
+      "preco": 14,
+      "sinonimos": [
+        "ninho",
+        "leite ninho",
+        "leite em po"
+      ]
+    },
+    "Oreo": {
+      "preco": 15,
+      "sinonimos": [
+        "oreo",
+        "oreos"
+      ]
+    }
   },
-  "taxas_entrega": { "Centro": 6, "Vila Assunção": 8, "Jardim": 8, "Campestre": 10 },
+  "taxas_entrega": {
+    "Centro": 6,
+    "Vila Assunção": 8,
+    "Jardim": 8,
+    "Campestre": 10
+  },
   "antecedencia_dias": 1,
   "capacidade_diaria": 40,
   "maximo_por_pedido": 30,
   "retirada": "Retirada combinada pelo WhatsApp após a confirmação.",
   "pix": "te mando a chave em seguida",
-  "telegram": { "ativo": false, "chat_id": "" }
+  "telegram": {
+    "ativo": false,
+    "chat_id": ""
+  },
+  "whatsapp": {
+    "pedidos_url": "http://localhost:5678/webhook/pedido",
+    "graph_url": "https://graph.facebook.com/v23.0",
+    "phone_number_id": "COLOQUE_O_PHONE_NUMBER_ID"
+  }
 }
