@@ -26,7 +26,8 @@ http.createServer((req, res) => {
       return res.end(JSON.stringify({ error: { message: "Invalid OAuth access token", code: 190 } }));
     }
     const msg = JSON.parse(corpo);
-    enviadas.push({ url: req.url, para: msg.to, texto: msg.text?.body });
+    enviadas.push({ url: req.url, para: msg.to, texto: msg.text?.body, modelo: msg.template?.name,
+      parametros: msg.template?.components?.[0]?.parameters?.map((p) => p.text) });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ messaging_product: "whatsapp", contacts: [{ input: msg.to, wa_id: msg.to }],
       messages: [{ id: `wamid.falso.${enviadas.length}` }] }));
