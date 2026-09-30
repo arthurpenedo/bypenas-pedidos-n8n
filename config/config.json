@@ -1,0 +1,15 @@
+{
+  "fuso": "America/Sao_Paulo",
+  "catalogo": {
+    "Clássica": { "preco": 12, "sinonimos": ["classica", "classicas", "tradicional", "tradicionais", "normal", "normais", "chocolate"] },
+    "Ninho": { "preco": 14, "sinonimos": ["ninho", "leite ninho", "leite em po"] },
+    "Oreo": { "preco": 15, "sinonimos": ["oreo", "oreos"] }
+  },
+  "taxas_entrega": { "Centro": 6, "Vila Assunção": 8, "Jardim": 8, "Campestre": 10 },
+  "antecedencia_dias": 1,
+  "capacidade_diaria": 40,
+  "maximo_por_pedido": 30,
+  "retirada": "Retirada combinada pelo WhatsApp após a confirmação.",
+  "pix": "te mando a chave em seguida",
+  "telegram": { "ativo": false, "chat_id": "" }
+}

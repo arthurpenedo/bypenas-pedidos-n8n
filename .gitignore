@@ -1,0 +1,5 @@
+node_modules/
+site/
+simulacao.json
+*.log
+.n8n-ci/

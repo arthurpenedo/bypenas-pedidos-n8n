@@ -1,0 +1,74 @@
+name: Simulação
+
+# Sobe o n8n de verdade, ativa os dois workflows, manda um dia de mensagens de clientes fictícios
+# pelos webhooks, confere cada resposta e o resumo de produção, e publica a página no GitHub Pages.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: simulacao-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  N8N_VERSION: 2.41.4
+  N8N_USER_FOLDER: ${{ github.workspace }}/.n8n-ci
+  N8N_DIAGNOSTICS_ENABLED: "false"
+  GENERIC_TIMEZONE: America/Sao_Paulo
+
+jobs:
+  simular:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: n8n-${{ env.N8N_VERSION }}
+      - name: Instalar o n8n
+        run: npm install -g --no-audit --no-fund n8n@${{ env.N8N_VERSION }}
+      - name: Importar e publicar os workflows
+        run: |
+          for w in workflows/*.json; do n8n import:workflow --input="$w"; done
+          n8n publish:workflow --id=bypenasPedido001
+          n8n publish:workflow --id=bypenasResumo001
+      - name: Subir o n8n
+        run: |
+          nohup n8n start > n8n.log 2>&1 &
+          for i in $(seq 90); do curl -sf http://localhost:5678/healthz && break; sleep 2; done
+      - name: Simular um dia de pedidos
+        run: node scripts/simular.js http://localhost:5678 simulacao.json
+      - name: Montar a página
+        run: node scripts/pagina.js simulacao.json site/index.html && cp simulacao.json site/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulacao
+          path: |
+            site
+            n8n.log
+      - if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  publicar:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: simular
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

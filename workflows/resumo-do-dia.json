@@ -1,0 +1,327 @@
+{
+  "id": "bypenasResumo001",
+  "name": "By.penas · Resumo do dia",
+  "nodes": [
+    {
+      "id": "r1",
+      "name": "Todo dia às 7h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "r2",
+      "name": "Consultar resumo",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "resumo",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "2f6c1b0e-8a4d-4e0b-9a51-b1e5a0000002"
+    },
+    {
+      "id": "r3",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Catálogo, preços (de exemplo), bairros atendidos, capacidade e entrega. Edite aqui ou em config/config.json.\nreturn [{ json: {\n  \"fuso\": \"America/Sao_Paulo\",\n  \"catalogo\": {\n    \"Clássica\": {\n      \"preco\": 12,\n      \"sinonimos\": [\n        \"classica\",\n        \"classicas\",\n        \"tradicional\",\n        \"tradicionais\",\n        \"normal\",\n        \"normais\",\n        \"chocolate\"\n      ]\n    },\n    \"Ninho\": {\n      \"preco\": 14,\n      \"sinonimos\": [\n        \"ninho\",\n        \"leite ninho\",\n        \"leite em po\"\n      ]\n    },\n    \"Oreo\": {\n      \"preco\": 15,\n      \"sinonimos\": [\n        \"oreo\",\n        \"oreos\"\n      ]\n    }\n  },\n  \"taxas_entrega\": {\n    \"Centro\": 6,\n    \"Vila Assunção\": 8,\n    \"Jardim\": 8,\n    \"Campestre\": 10\n  },\n  \"antecedencia_dias\": 1,\n  \"capacidade_diaria\": 40,\n  \"maximo_por_pedido\": 30,\n  \"retirada\": \"Retirada combinada pelo WhatsApp após a confirmação.\",\n  \"pix\": \"te mando a chave em seguida\",\n  \"telegram\": {\n    \"ativo\": false,\n    \"chat_id\": \"\"\n  }\n} }];"
+      }
+    },
+    {
+      "id": "r4",
+      "name": "Garantir tabela",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        100
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "pedidos_bypenas",
+        "columns": {
+          "column": [
+            {
+              "name": "cliente",
+              "type": "string"
+            },
+            {
+              "name": "telefone",
+              "type": "string"
+            },
+            {
+              "name": "mensagem",
+              "type": "string"
+            },
+            {
+              "name": "itens",
+              "type": "string"
+            },
+            {
+              "name": "unidades",
+              "type": "number"
+            },
+            {
+              "name": "data_entrega",
+              "type": "string"
+            },
+            {
+              "name": "modalidade",
+              "type": "string"
+            },
+            {
+              "name": "bairro",
+              "type": "string"
+            },
+            {
+              "name": "subtotal",
+              "type": "number"
+            },
+            {
+              "name": "taxa_entrega",
+              "type": "number"
+            },
+            {
+              "name": "total",
+              "type": "number"
+            },
+            {
+              "name": "problemas",
+              "type": "string"
+            },
+            {
+              "name": "status",
+              "type": "string"
+            },
+            {
+              "name": "resposta",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      }
+    },
+    {
+      "id": "r5",
+      "name": "Pedidos registrados",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        100
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "pedidos_bypenas"
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "r6",
+      "name": "Montar resumo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Interpreta a mensagem de pedido (\"quero 3 ninho e 2 oreo pra sábado, retiro\") e calcula o total.\n// Roda dentro de um nó Code do n8n (o build injeta este arquivo) e nos testes com node --test.\n//\n// Regras em vez de LLM: o vocabulário de um pedido é pequeno e previsível (sabores, números,\n// dias da semana). O que as regras não entendem vira \"precisa de atendimento\", nunca um chute.\n\nconst NUMEROS = {\n  um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10,\n  onze: 11, doze: 12, \"meia duzia\": 6, \"uma duzia\": 12, duzia: 12,\n};\nconst DIAS = [\"domingo\", \"segunda\", \"terca\", \"quarta\", \"quinta\", \"sexta\", \"sabado\"];\n\nfunction normalizar(texto) {\n  return (texto || \"\").normalize(\"NFD\").replace(/[̀-ͯ]/g, \"\").toLowerCase();\n}\n\n// Datas como \"AAAA-MM-DD\" no fuso de São Paulo, sem depender do fuso do servidor.\nfunction dataLocal(agora, fuso) {\n  return new Intl.DateTimeFormat(\"en-CA\", { timeZone: fuso, year: \"numeric\", month: \"2-digit\", day: \"2-digit\" }).format(agora);\n}\n\nfunction somarDias(iso, dias) {\n  const d = new Date(`${iso}T12:00:00Z`);\n  d.setUTCDate(d.getUTCDate() + dias);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction interpretarData(texto, hoje) {\n  if (/depois de amanha/.test(texto)) return somarDias(hoje, 2);\n  if (/\\bamanha\\b/.test(texto)) return somarDias(hoje, 1);\n  if (/\\bhoje\\b/.test(texto)) return hoje;\n  const dm = texto.match(/\\b(\\d{1,2})\\/(\\d{1,2})(?:\\/(\\d{2,4}))?\\b/);\n  if (dm) {\n    const ano = dm[3] ? (dm[3].length === 2 ? 2000 + Number(dm[3]) : Number(dm[3])) : Number(hoje.slice(0, 4));\n    let iso = `${ano}-${dm[2].padStart(2, \"0\")}-${dm[1].padStart(2, \"0\")}`;\n    if (!dm[3] && iso < hoje) iso = `${ano + 1}${iso.slice(4)}`; // \"05/01\" dito em dezembro é do ano seguinte\n    return iso;\n  }\n  const dia = DIAS.findIndex((d) => new RegExp(`\\\\b${d}(-feira)?\\\\b`).test(texto));\n  if (dia >= 0) {\n    const atual = new Date(`${hoje}T12:00:00Z`).getUTCDay();\n    return somarDias(hoje, ((dia - atual + 7) % 7) || 7); // \"sábado\" dito no sábado é o próximo\n  }\n  return null;\n}\n\nfunction interpretarItens(texto, catalogo) {\n  const sinonimos = [];\n  for (const [sabor, info] of Object.entries(catalogo)) {\n    for (const nome of [sabor, ...(info.sinonimos || [])]) sinonimos.push([normalizar(nome), sabor]);\n  }\n  sinonimos.sort((a, b) => b[0].length - a[0].length); // \"ninho com oreo\" antes de \"ninho\"\n  const quantidade = `(\\\\d+|${Object.keys(NUMEROS).sort((a, b) => b.length - a.length).join(\"|\")})`;\n  const recheio = \"(?:\\\\s*x)?\\\\s*(?:palhas?\\\\s*)?(?:italianas?\\\\s*)?(?:de\\\\s+|sabor\\\\s+|do\\\\s+|da\\\\s+)?\";\n  const itens = {};\n  for (const [nome, sabor] of sinonimos) {\n    const re = new RegExp(`${quantidade}${recheio}${nome.replace(/ /g, \"\\\\s+\")}\\\\b`, \"g\");\n    texto = texto.replace(re, (_, qtd) => {\n      itens[sabor] = (itens[sabor] || 0) + (NUMEROS[qtd] ?? Number(qtd));\n      return \" \";\n    });\n  }\n  return Object.entries(itens).map(([sabor, qtd]) => ({ sabor, qtd }));\n}\n\nfunction interpretarPedido(entrada, cfg, agora = new Date()) {\n  const texto = normalizar(entrada.mensagem);\n  const hoje = dataLocal(agora, cfg.fuso);\n  const itens = interpretarItens(texto, cfg.catalogo);\n  const data = interpretarData(texto, hoje);\n  const entrega = /\\b(entreg\\w*|mand\\w*|envi\\w*|delivery)\\b/.test(texto);\n  const bairro = Object.keys(cfg.taxas_entrega).find((b) => texto.includes(normalizar(b))) || null;\n  const problemas = [];\n\n  if (!itens.length) problemas.push(\"não identifiquei sabores e quantidades\");\n  if (!data) problemas.push(\"não identifiquei a data\");\n  else if (data < somarDias(hoje, cfg.antecedencia_dias)) {\n    problemas.push(`pedidos precisam de ${cfg.antecedencia_dias} dia(s) de antecedência`);\n  }\n  if (entrega && !bairro) problemas.push(\"entrega fora dos bairros atendidos (ou bairro não informado)\");\n  const totalItens = itens.reduce((s, i) => s + i.qtd, 0);\n  if (totalItens > cfg.maximo_por_pedido) problemas.push(`acima de ${cfg.maximo_por_pedido} unidades: combinar direto`);\n\n  const subtotal = itens.reduce((s, i) => s + i.qtd * cfg.catalogo[i.sabor].preco, 0);\n  const taxa = entrega && bairro ? cfg.taxas_entrega[bairro] : 0;\n  return {\n    cliente: (entrada.cliente || \"\").trim(),\n    telefone: (entrada.telefone || \"\").replace(/\\D/g, \"\"),\n    mensagem: entrada.mensagem,\n    itens,\n    unidades: totalItens,\n    data_entrega: data,\n    modalidade: entrega ? \"entrega\" : \"retirada\",\n    bairro,\n    subtotal,\n    taxa_entrega: taxa,\n    total: subtotal + taxa,\n    problemas,\n  };\n}\n\n// Resumo do dia para quem produz: quanto fazer de cada sabor, quem retira, para onde entregar e o faturamento.\n// Roda dentro de um nó Code do n8n (o build injeta este arquivo) e nos testes com node --test.\n\nfunction resumirDia(linhas, data, cfg) {\n  const pedidos = linhas.filter((l) => l.data_entrega === data && l.status === \"confirmado\");\n  const producao = Object.fromEntries(Object.keys(cfg.catalogo).map((s) => [s, 0]));\n  for (const p of pedidos) {\n    for (const item of JSON.parse(p.itens)) producao[item.sabor] = (producao[item.sabor] || 0) + item.qtd;\n  }\n  const porBairro = {};\n  for (const p of pedidos.filter((p) => p.modalidade === \"entrega\")) {\n    (porBairro[p.bairro] = porBairro[p.bairro] || []).push({ cliente: p.cliente, total: p.total });\n  }\n  const unidades = Object.values(producao).reduce((a, b) => a + b, 0);\n  return {\n    data,\n    pedidos: pedidos.length,\n    unidades,\n    capacidade_usada: unidades / cfg.capacidade_diaria,\n    producao,\n    retiradas: pedidos.filter((p) => p.modalidade === \"retirada\").map((p) => ({ cliente: p.cliente, total: p.total })),\n    entregas: porBairro,\n    faturamento: pedidos.reduce((s, p) => s + Number(p.total), 0),\n    taxas_entrega: pedidos.reduce((s, p) => s + Number(p.taxa_entrega), 0),\n  };\n}\n\nfunction textoResumo(r) {\n  const brl = (v) => `R$ ${Number(v).toFixed(2).replace(\".\", \",\")}`;\n  const linhas = [`📋 Produção de ${r.data}: ${r.pedidos} pedido(s), ${r.unidades} unidade(s) (${Math.round(r.capacidade_usada * 100)}% da capacidade)`];\n  for (const [sabor, qtd] of Object.entries(r.producao)) if (qtd) linhas.push(`• ${sabor}: ${qtd}`);\n  if (r.retiradas.length) linhas.push(`\\n🛍️ Retiradas: ${r.retiradas.map((p) => p.cliente).join(\", \")}`);\n  for (const [bairro, lista] of Object.entries(r.entregas)) {\n    linhas.push(`🛵 ${bairro}: ${lista.map((p) => p.cliente).join(\", \")}`);\n  }\n  linhas.push(`\\n💰 Faturamento: ${brl(r.faturamento)} (inclui ${brl(r.taxas_entrega)} de entrega)`);\n  return linhas.join(\"\\n\");\n}\n\nconst cfg = $('Configuração').first().json;\n// Pelo webhook dá para pedir outro dia: /webhook/resumo?data=AAAA-MM-DD\nlet data = dataLocal(new Date(), cfg.fuso);\ntry { data = $('Consultar resumo').first().json.query.data || data; } catch (e) { /* disparado pelo agendamento */ }\nconst linhas = $input.all().map((i) => i.json).filter((l) => l.status);\nconst resumo = resumirDia(linhas, data, cfg);\nreturn [{ json: { ...resumo, texto: textoResumo(resumo) } }];"
+      }
+    },
+    {
+      "id": "r7",
+      "name": "Enviar no Telegram?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "t1",
+              "leftValue": "={{ $('Configuração').first().json.telegram.ativo }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "r8",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "chatId": "={{ $('Configuração').first().json.telegram.chat_id }}",
+        "text": "={{ $json.texto }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "r9",
+      "name": "Responder com o resumo",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1100,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Todo dia às 7h": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar resumo": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Garantir tabela",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Garantir tabela": {
+      "main": [
+        [
+          {
+            "node": "Pedidos registrados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedidos registrados": {
+      "main": [
+        [
+          {
+            "node": "Montar resumo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar resumo": {
+      "main": [
+        [
+          {
+            "node": "Enviar no Telegram?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Responder com o resumo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar no Telegram?": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {},
+  "tags": []
+}
